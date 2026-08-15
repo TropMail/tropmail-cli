@@ -1,0 +1,115 @@
+version: 2
+
+project_name: tropmail
+
+before:
+  hooks:
+    - go mod download
+    - go test ./...
+
+builds:
+  - id: tropmail
+    main: .
+    binary: tropmail
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/tropmail/tropmail-cli/internal/cmd.Version={{ .Version }}
+      - -X github.com/tropmail/tropmail-cli/internal/cmd.Commit={{ .ShortCommit }}
+      - -X github.com/tropmail/tropmail-cli/internal/cmd.Date={{ .CommitDate }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: tropmail
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other
+      order: 99
+
+homebrew_casks:
+  - name: tropmail
+    binaries: [tropmail]
+    repository:
+      owner: tropmail
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+    homepage: https://tropmail.com
+    description: Read your TropMail inbox from the terminal
+    url:
+      verified: github.com/tropmail/tropmail-cli
+    hooks:
+      post:
+        # The binaries are not notarized, so Gatekeeper would otherwise refuse
+        # to run them on macOS.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/tropmail"]
+          end
+
+dockers_v2:
+  - images:
+      - ghcr.io/tropmail/tropmail
+    tags:
+      - '{{ .Version }}'
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile
+    labels:
+      org.opencontainers.image.title: '{{ .ProjectName }}'
+      org.opencontainers.image.description: Read your TropMail inbox from the terminal
+      org.opencontainers.image.version: '{{ .Version }}'
+      org.opencontainers.image.revision: '{{ .FullCommit }}'
+      org.opencontainers.image.source: '{{ .GitURL }}'
+      org.opencontainers.image.licenses: MIT
+
+release:
+  github:
+    owner: tropmail
+    name: tropmail-cli
+  header: |
+    ## tropmail {{ .Version }}
+
+    ```bash
+    brew install tropmail/tap/tropmail
+    go install github.com/tropmail/tropmail-cli@{{ .Tag }}
+    ```
+  footer: |
+    **Full changelog**: https://github.com/tropmail/tropmail-cli/compare/{{ .PreviousTag }}...{{ .Tag }}

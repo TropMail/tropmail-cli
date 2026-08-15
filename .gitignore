@@ -1,0 +1,9 @@
+tropmail
+*.exe
+*.test
+*.out
+vendor/
+dist/
+.DS_Store
+.env
+PUBLISH.md
