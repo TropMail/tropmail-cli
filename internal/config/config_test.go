@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -12,6 +13,20 @@ func tempConfig(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("TROPMAIL_CONFIG_DIR", dir)
 	return dir
+}
+
+func assertOwnerOnly(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("%s mode = %o, want 600", path, mode)
+	}
 }
 
 func TestLoadMissingFileYieldsEmptyConfig(t *testing.T) {
@@ -40,14 +55,7 @@ func TestSaveAndReload(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-
-	info, err := os.Stat(filepath.Join(dir, "config.toml"))
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("config mode = %o, want 600", mode)
-	}
+	assertOwnerOnly(t, filepath.Join(dir, "config.toml"))
 
 	reloaded, err := Load()
 	if err != nil {
@@ -125,14 +133,7 @@ func TestFileCredentialsRoundTrip(t *testing.T) {
 	if err := storeKeyInFile("default", key); err != nil {
 		t.Fatalf("store: %v", err)
 	}
-
-	info, err := os.Stat(filepath.Join(dir, "credentials.toml"))
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("credentials mode = %o, want 600", mode)
-	}
+	assertOwnerOnly(t, filepath.Join(dir, "credentials.toml"))
 
 	// A keyring may exist on the test machine and would shadow the file, so
 	// only assert the file path when the keyring lookup misses.
