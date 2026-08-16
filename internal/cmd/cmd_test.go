@@ -20,7 +20,7 @@ var emailPayload = map[string]any{
 	"timestamp":        "2026-01-01T00:00:00Z",
 	"subject":          "Welcome to TropMail",
 	"from":             map[string]any{"name": "Sender", "address": "sender@example.com"},
-	"body":             "Preview text",
+	"preview":          "Preview text",
 	"attachmentsCount": 1,
 	"status":           "Open",
 	"email_state":      "Open",
@@ -49,6 +49,11 @@ var detailPayload = map[string]any{
 	"security": map[string]any{},
 }
 
+var mailboxPayload = map[string]any{
+	"id": "mb1", "email": "user@tropmail.com",
+	"opened_count": 3, "closed_count": 1, "favorite_count": 2,
+}
+
 // fakeAPI serves the envelope for every route the CLI touches.
 func fakeAPI(t *testing.T, requests *[]string) *httptest.Server {
 	t.Helper()
@@ -61,19 +66,10 @@ func fakeAPI(t *testing.T, requests *[]string) *httptest.Server {
 		var data any
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 		switch {
-		case path == "/mailbox":
-			data = map[string]any{
-				"id": "mb1", "email": "user@tropmail.com",
-				"opened_count": 3, "closed_count": 1, "favorite_count": 2,
-			}
-		case path == "/validate":
-			data = map[string]any{"mailbox_id": "mb1", "tier": "Pro"}
+		case path == "/mailboxes":
+			data = map[string]any{"mailboxes": []any{mailboxPayload}}
 		case path == "/health":
 			data = map[string]any{"status": "ok", "version": "1.0.0", "timestamp": "t"}
-		case path == "/emails", path == "/emails/search":
-			data = map[string]any{
-				"emails": []any{emailPayload}, "total": 4, "limit": 20, "page": 1,
-			}
 		case strings.HasSuffix(path, "/scan-attachments"),
 			strings.HasSuffix(path, "/download-attachments"):
 			data = []any{}
@@ -83,20 +79,30 @@ func fakeAPI(t *testing.T, requests *[]string) *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("%PDF-1.4 mock"))
 			return
-		case strings.HasPrefix(path, "/email/") && r.Method == http.MethodPost:
+		case strings.Contains(path, "/emails/search"):
+			data = map[string]any{
+				"emails": []any{emailPayload}, "total": 0, "limit": 20, "page": 1,
+			}
+		case strings.HasSuffix(path, "/emails"):
+			data = map[string]any{
+				"emails": []any{emailPayload}, "total": 4, "limit": 20, "page": 1,
+			}
+		case strings.Contains(path, "/emails/") && r.Method == http.MethodPost:
 			data = map[string]any{"email_id": "11111111", "action_status": "Favorite"}
-		case strings.HasPrefix(path, "/email/"):
+		case strings.Contains(path, "/emails/"):
 			data = detailPayload
 		case strings.HasSuffix(path, "/scan"):
 			data = map[string]any{
 				"attachment_id": "22222222", "filename": "invoice.pdf",
 				"scan_status": "Processing", "status": "Processing",
 			}
-		case strings.HasPrefix(path, "/attachment/"):
+		case strings.Contains(path, "/attachments/"):
 			data = map[string]any{
 				"attachment_id": "22222222", "email_id": "11111111",
 				"filename": "invoice.pdf", "size": 2048, "scan_status": "Clean",
 			}
+		case strings.HasPrefix(path, "/mailboxes/"):
+			data = mailboxPayload
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte("Not Found"))
@@ -125,13 +131,12 @@ func capture(t *testing.T) (*bytes.Buffer, *bytes.Buffer) {
 	return &stdout, &stderr
 }
 
-// isolate points config, cache, and credentials at a throwaway directory.
+// isolate points config and credentials at a throwaway directory.
 func isolate(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
 	t.Setenv("TROPMAIL_CONFIG_DIR", filepath.Join(dir, "config"))
-	t.Setenv("TROPMAIL_CACHE_DIR", filepath.Join(dir, "cache"))
 	t.Setenv("TROPMAIL_API_KEY", testAPIKey)
 	t.Setenv("NO_COLOR", "1")
 }
@@ -217,7 +222,7 @@ func TestSearchCommand(t *testing.T) {
 	}
 }
 
-func TestReadCommandUsesCacheOnSecondRun(t *testing.T) {
+func TestReadCommandFetchesBodyEachTime(t *testing.T) {
 	var requests []string
 	server := fakeAPI(t, &requests)
 
@@ -241,12 +246,12 @@ func TestReadCommandUsesCacheOnSecondRun(t *testing.T) {
 
 	detailCalls := 0
 	for _, request := range requests {
-		if strings.Contains(request, "/email/11111111") {
+		if strings.Contains(request, "/emails/11111111") {
 			detailCalls++
 		}
 	}
-	if detailCalls != 1 {
-		t.Errorf("fetched the body %d times, want 1 (the cache should serve the second read)",
+	if detailCalls != 2 {
+		t.Errorf("fetched the body %d times, want 2 (bodies are not stored on disk)",
 			detailCalls)
 	}
 }
@@ -273,7 +278,7 @@ func TestActionCommand(t *testing.T) {
 
 	found := false
 	for _, request := range requests {
-		if strings.HasPrefix(request, "POST /api/v1/email/") {
+		if strings.HasPrefix(request, "POST /api/v1/mailboxes/") {
 			found = true
 		}
 	}
@@ -311,7 +316,7 @@ func TestAuthStatusCommand(t *testing.T) {
 		t.Fatalf("auth status: %v", err)
 	}
 	payload := decode(t, stdout)
-	if payload["tier"] != "Pro" || payload["storage"] != "environment" {
+	if payload["storage"] != "environment" {
 		t.Errorf("unexpected payload: %s", stdout)
 	}
 }

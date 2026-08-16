@@ -11,8 +11,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	tropmail "github.com/tropmail/tropmail-go"
-
-	"github.com/tropmail/tropmail-cli/internal/cache"
 )
 
 const apiKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -25,12 +23,19 @@ func stubAPI(t *testing.T) *tropmail.Client {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var data any
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/mailbox"):
+		case strings.HasSuffix(r.URL.Path, "/mailboxes"):
+			data = map[string]any{
+				"mailboxes": []any{map[string]any{
+					"id": "mb1", "email": "user@tropmail.com",
+					"opened_count": 2, "closed_count": 1, "favorite_count": 1,
+				}},
+			}
+		case strings.Contains(r.URL.Path, "/mailboxes/") && !strings.Contains(r.URL.Path, "/emails") && !strings.Contains(r.URL.Path, "/attachments"):
 			data = map[string]any{
 				"id": "mb1", "email": "user@tropmail.com",
 				"opened_count": 2, "closed_count": 1, "favorite_count": 1,
 			}
-		case strings.Contains(r.URL.Path, "/email/"):
+		case strings.Contains(r.URL.Path, "/emails/"):
 			data = map[string]any{
 				"id": "a1", "subject": "One", "content": "body",
 				"from":        map[string]any{"name": "", "address": "s@example.com"},
@@ -55,14 +60,13 @@ func stubAPI(t *testing.T) *tropmail.Client {
 
 func testModel(t *testing.T) Model {
 	t.Helper()
-	t.Setenv("TROPMAIL_CACHE_DIR", t.TempDir())
 
 	model := newModel(context.Background(), Options{
-		Client:   stubAPI(t),
-		Cache:    cache.New(true),
-		Status:   tropmail.StatusAll,
-		PageSize: 50,
-		NoColor:  true,
+		Client:    stubAPI(t),
+		MailboxID: "mb1",
+		Status:    tropmail.StatusAll,
+		PageSize:  50,
+		NoColor:   true,
 	})
 	next, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	return next.(Model)

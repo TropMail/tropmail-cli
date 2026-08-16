@@ -12,57 +12,25 @@ import (
 	tropmail "github.com/tropmail/tropmail-go"
 	"golang.org/x/term"
 
-	"github.com/tropmail/tropmail-cli/internal/cache"
 	"github.com/tropmail/tropmail-cli/internal/output"
 )
 
-// allViews are the cache keys invalidated when an email changes.
-var allViews = []tropmail.View{tropmail.ViewText, tropmail.ViewHTML, tropmail.ViewMarkdown}
-
-// fetchDetail returns an email detail, serving the local cache when possible.
-//
-// Bodies never change once delivered, and the markdown view can take the server
-// up to a minute to produce, so a cache hit is the difference between instant
-// and slow.
+// fetchDetail loads an email body for display. Nothing is written to disk.
 func (a *App) fetchDetail(
 	ctx context.Context,
 	client *tropmail.Client,
+	mailboxID string,
 	id string,
 	view tropmail.View,
 	timestamp string,
-) (*tropmail.EmailDetail, bool, error) {
-	key := cache.BodyKey(id, string(view))
-
-	var cached tropmail.EmailDetail
-	if a.Cache.Get(key, &cached) && cached.Content != "" {
-		return &cached, true, nil
-	}
-
-	var (
-		detail *tropmail.EmailDetail
-		err    error
-	)
+) (*tropmail.EmailDetail, error) {
 	if view == tropmail.ViewMarkdown {
-		detail, err = client.Emails.GetMarkdown(ctx, id, timestamp)
-	} else {
-		detail, err = client.Emails.Get(ctx, id, tropmail.GetOptions{
-			View:      view,
-			Timestamp: timestamp,
-		})
+		return client.Emails.GetMarkdown(ctx, mailboxID, id, timestamp)
 	}
-	if err != nil {
-		return nil, false, err
-	}
-
-	a.Cache.Put(key, detail)
-	return detail, false, nil
-}
-
-// invalidate drops every cached view of an email after it changes.
-func (a *App) invalidate(id string) {
-	for _, view := range allViews {
-		a.Cache.Remove(cache.BodyKey(id, string(view)))
-	}
+	return client.Emails.Get(ctx, mailboxID, id, tropmail.GetOptions{
+		View:      view,
+		Timestamp: timestamp,
+	})
 }
 
 func newReadCommand() *cobra.Command {
@@ -80,8 +48,7 @@ func newReadCommand() *cobra.Command {
 		Long: `Print a single email.
 
 The default markdown view is rendered with syntax colours in a terminal and
-emitted as plain markdown when piped. Bodies are cached under ~/.cache/tropmail,
-so re-reading a message costs no network round trip; pass --no-cache to refetch.`,
+emitted as plain markdown when piped.`,
 		Example: `  tropmail read 018f... 
   tropmail read 018f... --view text
   tropmail read 018f... --raw > message.md`,
@@ -95,6 +62,10 @@ so re-reading a message costs no network round trip; pass --no-cache to refetch.
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			selected := tropmail.View(view)
 			switch selected {
@@ -103,8 +74,8 @@ so re-reading a message costs no network round trip; pass --no-cache to refetch.
 				return fmt.Errorf("unknown view %q: use text, html, or markdown", view)
 			}
 
-			detail, cached, err := app.fetchDetail(
-				cmd.Context(), client, args[0], selected, timestamp)
+			detail, err := app.fetchDetail(
+				cmd.Context(), client, mailboxID, args[0], selected, timestamp)
 			if err != nil {
 				return err
 			}
@@ -117,7 +88,7 @@ so re-reading a message costs no network round trip; pass --no-cache to refetch.
 				return nil
 			}
 
-			renderHeader(app.Printer, detail, cached)
+			renderHeader(app.Printer, detail)
 			body := detail.Content
 			if selected == tropmail.ViewMarkdown && isatty.IsTerminal(os.Stdout.Fd()) {
 				body = renderMarkdown(body, width, app.Printer.NoColor)
@@ -136,7 +107,7 @@ so re-reading a message costs no network round trip; pass --no-cache to refetch.
 	return cmd
 }
 
-func renderHeader(p *printer, detail *tropmail.EmailDetail, cached bool) {
+func renderHeader(p *printer, detail *tropmail.EmailDetail) {
 	sender := detail.From.Address
 	if detail.From.Name != "" {
 		sender = fmt.Sprintf("%s <%s>", detail.From.Name, detail.From.Address)
@@ -155,9 +126,6 @@ func renderHeader(p *printer, detail *tropmail.EmailDetail, cached bool) {
 	state := string(detail.EmailState)
 	if detail.ActionStatus != nil && *detail.ActionStatus != "" {
 		state += " · " + string(*detail.ActionStatus)
-	}
-	if cached {
-		state += " · cached"
 	}
 	p.Printf("%s\n\n", p.Muted(state))
 }

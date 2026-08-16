@@ -28,12 +28,16 @@ func runTUI(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+	if err != nil {
+		return err
+	}
 
 	return tui.Run(cmd.Context(), tui.Options{
-		Client:   client,
-		Cache:    app.Cache,
-		Status:   tropmail.StatusAll,
-		PageSize: 50,
-		NoColor:  app.Printer.NoColor,
+		Client:    client,
+		MailboxID: mailboxID,
+		Status:    tropmail.StatusAll,
+		PageSize:  50,
+		NoColor:   app.Printer.NoColor,
 	})
 }

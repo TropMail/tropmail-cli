@@ -31,7 +31,7 @@ func newAuthLoginCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Store an API key for a profile",
-		Long: `Store an API key in the OS keyring, or a 0600 file when no keyring exists.
+		Long: `Store an API key in the OS keyring, or a restricted credentials file when no keyring exists.
 
 The key is validated against the API before being saved, so a typo fails here
 rather than on your next command.`,
@@ -66,13 +66,13 @@ rather than on your next command.`,
 				return err
 			}
 
-			validation, err := client.Mailbox.Validate(cmd.Context())
+			listed, err := client.Mailboxes.List(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("key rejected by %s: %w", baseURL, err)
 			}
-			mailbox, err := client.Mailbox.Get(cmd.Context())
-			if err != nil {
-				return err
+			boxes := listed.Mailboxes
+			if len(boxes) == 0 {
+				return fmt.Errorf("key accepted by %s but has no mailboxes", baseURL)
 			}
 
 			storage, err := config.StoreKey(app.Profile, apiKey)
@@ -81,8 +81,12 @@ rather than on your next command.`,
 			}
 
 			profile := app.Config.Get(app.Profile)
-			profile.Email = mailbox.Email
-			profile.Tier = validation.Tier
+			profile.Email = boxes[0].Email
+			if len(boxes) == 1 {
+				profile.MailboxID = boxes[0].ID
+			} else {
+				profile.MailboxID = ""
+			}
 			if flags.baseURL != "" {
 				profile.BaseURL = flags.baseURL
 			}
@@ -92,17 +96,27 @@ rather than on your next command.`,
 			}
 
 			return app.Printer.Print(map[string]any{
-				"profile":  app.Profile,
-				"email":    mailbox.Email,
-				"tier":     validation.Tier,
-				"storage":  string(storage),
-				"base_url": baseURL,
+				"profile":   app.Profile,
+				"email":     profile.Email,
+				"mailboxes": listed.Mailboxes,
+				"storage":   string(storage),
+				"base_url":  baseURL,
 			}, func(p *printer) {
-				p.Printf("Logged in as %s (%s tier)\n", p.Accent(mailbox.Email), validation.Tier)
+				p.Printf("Logged in (%d mailbox", len(boxes))
+				if len(boxes) != 1 {
+					p.Printf("es")
+				}
+				p.Printf(")\n")
+				for _, box := range boxes {
+					p.Printf("  %s  %s\n", p.Accent(box.Email), p.Muted(box.ID))
+				}
 				p.Printf("%s\n", p.Muted(fmt.Sprintf(
 					"profile %q, key stored in the %s", app.Profile, storage)))
+				if len(boxes) > 1 {
+					p.Printf("Pass --mailbox <id> (or TROPMAIL_MAILBOX_ID) on later commands.\n")
+				}
 				if storage == config.StorageFile {
-					p.Warnf("No OS keyring available; the key is in a 0600 file.\n")
+					p.Warnf("No OS keyring available; the key is in a restricted credentials file.\n")
 				}
 			})
 		},
@@ -161,21 +175,17 @@ func newAuthStatusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			validation, err := client.Mailbox.Validate(cmd.Context())
-			if err != nil {
-				return err
-			}
-			mailbox, err := client.Mailbox.Get(cmd.Context())
+			listed, err := client.Mailboxes.List(cmd.Context())
 			if err != nil {
 				return err
 			}
 
 			limit := client.RateLimit()
+			remembered := app.Config.Get(app.Profile).MailboxID
 			return app.Printer.Print(map[string]any{
 				"profile":    app.Profile,
-				"email":      mailbox.Email,
-				"mailbox_id": validation.MailboxID,
-				"tier":       validation.Tier,
+				"mailboxes":  listed.Mailboxes,
+				"mailbox_id": remembered,
 				"storage":    string(storage),
 				"base_url":   client.BaseURL(),
 				"rate_limit": map[string]any{
@@ -184,8 +194,12 @@ func newAuthStatusCommand() *cobra.Command {
 				},
 			}, func(p *printer) {
 				p.Printf("%s  %s\n", p.Bold("profile"), app.Profile)
-				p.Printf("%s    %s\n", p.Bold("email"), mailbox.Email)
-				p.Printf("%s     %s\n", p.Bold("tier"), validation.Tier)
+				if remembered != "" {
+					p.Printf("%s %s\n", p.Bold("mailbox"), remembered)
+				}
+				for _, box := range listed.Mailboxes {
+					p.Printf("%s    %s  %s\n", p.Bold("inbox"), box.Email, p.Muted(box.ID))
+				}
 				p.Printf("%s  %s\n", p.Bold("api key"), string(storage))
 				p.Printf("%s %s\n", p.Bold("endpoint"), client.BaseURL())
 				if limit.Limit > 0 {

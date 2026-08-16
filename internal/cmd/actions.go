@@ -14,7 +14,7 @@ type action struct {
 	aliases []string
 	short   string
 	long    string
-	apply   func(context.Context, *tropmail.Client, string) (*tropmail.ActionResult, error)
+	apply   func(context.Context, *tropmail.Client, string, string) (*tropmail.ActionResult, error)
 	done    string
 }
 
@@ -23,16 +23,16 @@ func newActionCommands() []*cobra.Command {
 		{
 			use:   "open",
 			short: "Mark emails as opened",
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.SetState(ctx, id, tropmail.StateOpen)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.SetState(ctx, mailboxID, id, tropmail.StateOpen)
 			},
 			done: "opened",
 		},
 		{
 			use:   "close",
 			short: "Mark emails as closed",
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.SetState(ctx, id, tropmail.StateClose)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.SetState(ctx, mailboxID, id, tropmail.StateClose)
 			},
 			done: "closed",
 		},
@@ -40,8 +40,8 @@ func newActionCommands() []*cobra.Command {
 			use:     "fav",
 			aliases: []string{"favorite", "star"},
 			short:   "Flag emails as favorites",
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.Favorite(ctx, id)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.Favorite(ctx, mailboxID, id)
 			},
 			done: "favorited",
 		},
@@ -52,8 +52,8 @@ func newActionCommands() []*cobra.Command {
 
 Blocking applies to the sender address, not just this message: future mail from
 them is rejected at delivery. Undo it with 'tropmail unblock'.`,
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.Block(ctx, id)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.Block(ctx, mailboxID, id)
 			},
 			done: "blocked",
 		},
@@ -61,8 +61,8 @@ them is rejected at delivery. Undo it with 'tropmail unblock'.`,
 			use:     "unblock",
 			aliases: []string{"clear", "unfav"},
 			short:   "Clear the action status, unblocking the sender",
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.ClearAction(ctx, id)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.ClearAction(ctx, mailboxID, id)
 			},
 			done: "cleared",
 		},
@@ -74,8 +74,8 @@ them is rejected at delivery. Undo it with 'tropmail unblock'.`,
 
 The message is hidden and will be permanently removed after the retention window;
 it stays recoverable until then.`,
-			apply: func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-				return c.Emails.Delete(ctx, id)
+			apply: func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+				return c.Emails.Delete(ctx, mailboxID, id)
 			},
 			done: "deleted",
 		},
@@ -112,14 +112,17 @@ your tier's rate limit, so bulk changes will not trip a 429.`,
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			results := make([]*tropmail.ActionResult, 0, len(args))
 			for _, id := range args {
-				result, err := spec.apply(cmd.Context(), client, id)
+				result, err := spec.apply(cmd.Context(), client, mailboxID, id)
 				if err != nil {
 					return fmt.Errorf("%s %s: %w", spec.use, id, err)
 				}
-				app.invalidate(id)
 				results = append(results, result)
 			}
 

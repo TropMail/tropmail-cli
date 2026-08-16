@@ -29,6 +29,36 @@ func assertOwnerOnly(t *testing.T, path string) {
 	}
 }
 
+func TestDirIsHomeTropmail(t *testing.T) {
+	t.Setenv("TROPMAIL_CONFIG_DIR", "")
+	dir, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	if filepath.Base(dir) != ".tropmail" {
+		t.Errorf("Dir = %q, want a path ending in .tropmail", dir)
+	}
+}
+
+func TestCopyLegacyFiles(t *testing.T) {
+	legacy := t.TempDir()
+	dest := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "config.toml"), []byte("default_profile = \"work\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	copyLegacyFiles(filepath.Join(dest, "new"), legacy)
+
+	t.Setenv("TROPMAIL_CONFIG_DIR", filepath.Join(dest, "new"))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load after copy: %v", err)
+	}
+	if cfg.DefaultProfile != "work" {
+		t.Errorf("default = %q, want work", cfg.DefaultProfile)
+	}
+}
+
 func TestLoadMissingFileYieldsEmptyConfig(t *testing.T) {
 	tempConfig(t)
 

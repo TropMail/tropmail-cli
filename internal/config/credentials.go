@@ -30,6 +30,7 @@ type credentialsFile struct {
 }
 
 func credentialsPath() (string, error) {
+	migrateLegacyConfig()
 	dir, err := Dir()
 	if err != nil {
 		return "", err

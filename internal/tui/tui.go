@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	tropmail "github.com/tropmail/tropmail-go"
 
-	"github.com/tropmail/tropmail-cli/internal/cache"
 	"github.com/tropmail/tropmail-cli/internal/output"
 )
 
@@ -34,11 +33,11 @@ const rowLines = 2
 
 // Options configures the inbox reader.
 type Options struct {
-	Client   *tropmail.Client
-	Cache    *cache.Cache
-	Status   tropmail.ListStatus
-	PageSize int
-	NoColor  bool
+	Client    *tropmail.Client
+	MailboxID string
+	Status    tropmail.ListStatus
+	PageSize  int
+	NoColor   bool
 }
 
 type focusArea int
@@ -60,7 +59,6 @@ const (
 type Model struct {
 	ctx      context.Context
 	client   *tropmail.Client
-	store    *cache.Cache
 	theme    theme
 	keys     keyMap
 	help     help.Model
@@ -72,6 +70,7 @@ type Model struct {
 	cursor      int
 	page        int
 	pageSize    int
+	mailboxID   string
 	hasMore     bool
 	loadingPage bool
 
@@ -81,7 +80,6 @@ type Model struct {
 	mailbox       *tropmail.Mailbox
 	detail        *tropmail.EmailDetail
 	detailID      string
-	detailCached  bool
 	view          tropmail.View
 	loadingDetail bool
 	showAttach    bool
@@ -133,7 +131,6 @@ func newModel(ctx context.Context, opts Options) Model {
 	return Model{
 		ctx:         ctx,
 		client:      opts.Client,
-		store:       opts.Cache,
 		theme:       newTheme(),
 		keys:        newKeyMap(),
 		help:        helper,
@@ -141,6 +138,7 @@ func newModel(ctx context.Context, opts Options) Model {
 		input:       search,
 		page:        1,
 		pageSize:    opts.PageSize,
+		mailboxID:   opts.MailboxID,
 		status:      opts.Status,
 		view:        tropmail.ViewMarkdown,
 		loadingPage: true,
@@ -152,8 +150,8 @@ func newModel(ctx context.Context, opts Options) Model {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		loadMailbox(m.ctx, m.client),
-		loadPage(m.ctx, m.client, "", m.status, 1, m.pageSize, true),
+		loadMailbox(m.ctx, m.client, m.mailboxID),
+		loadPage(m.ctx, m.client, m.mailboxID, "", m.status, 1, m.pageSize, true),
 	)
 }
 
@@ -260,7 +258,6 @@ func (m Model) detailLoaded(msg detailLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.detail = msg.detail
 	m.detailID = msg.id
-	m.detailCached = msg.cached
 	m.refreshPreview()
 	return m, nil
 }
@@ -286,7 +283,7 @@ func (m Model) actionDone(msg actionDoneMsg) (tea.Model, tea.Cmd) {
 
 	m.message = msg.label + " " + shortID(msg.id)
 	m.isError = false
-	return m, loadMailbox(m.ctx, m.client)
+	return m, loadMailbox(m.ctx, m.client, m.mailboxID)
 }
 
 func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -320,7 +317,7 @@ func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail = nil
 		m.detailID = ""
 		m.refreshPreview()
-		return m, loadPage(m.ctx, m.client, m.query, m.status, 1, m.pageSize, true)
+		return m, loadPage(m.ctx, m.client, m.mailboxID, m.query, m.status, 1, m.pageSize, true)
 	}
 
 	var cmd tea.Cmd
@@ -367,8 +364,8 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loadingPage = true
 		m.message = "refreshing"
 		return m, tea.Batch(
-			loadMailbox(m.ctx, m.client),
-			loadPage(m.ctx, m.client, m.query, m.status, 1, m.pageSize, true),
+			loadMailbox(m.ctx, m.client, m.mailboxID),
+			loadPage(m.ctx, m.client, m.mailboxID, m.query, m.status, 1, m.pageSize, true),
 		)
 
 	case key.Matches(msg, m.keys.Attach):
@@ -468,7 +465,7 @@ func (m *Model) maybePrefetch() tea.Cmd {
 		return nil
 	}
 	m.loadingPage = true
-	return loadPage(m.ctx, m.client, m.query, m.status, m.page+1, m.pageSize, false)
+	return loadPage(m.ctx, m.client, m.mailboxID, m.query, m.status, m.page+1, m.pageSize, false)
 }
 
 func (m *Model) openSelected() tea.Cmd {
@@ -480,7 +477,7 @@ func (m *Model) openSelected() tea.Cmd {
 		return nil
 	}
 	m.loadingDetail = true
-	return loadDetail(m.ctx, m.client, m.store, email, m.view)
+	return loadDetail(m.ctx, m.client, m.mailboxID, email, m.view)
 }
 
 func (m Model) selected() (tropmail.Email, bool) {
@@ -490,7 +487,7 @@ func (m Model) selected() (tropmail.Email, bool) {
 	return m.emails[m.cursor], true
 }
 
-type actionFunc func(context.Context, *tropmail.Client, string) (*tropmail.ActionResult, error)
+type actionFunc func(context.Context, *tropmail.Client, string, string) (*tropmail.ActionResult, error)
 
 // verbs are the two forms of an action used in the status bar: while it is in
 // flight and once it lands.
@@ -503,33 +500,33 @@ type verbs struct {
 func (m Model) actionFor(msg tea.KeyMsg) (actionFunc, verbs, bool) {
 	switch {
 	case key.Matches(msg, m.keys.Favorite):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.Favorite(ctx, id)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.Favorite(ctx, mailboxID, id)
 		}, verbs{"favoriting…", "favorited"}, true
 
 	case key.Matches(msg, m.keys.Block):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.Block(ctx, id)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.Block(ctx, mailboxID, id)
 		}, verbs{"blocking…", "blocked"}, true
 
 	case key.Matches(msg, m.keys.Delete):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.Delete(ctx, id)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.Delete(ctx, mailboxID, id)
 		}, verbs{"deleting…", "deleted"}, true
 
 	case key.Matches(msg, m.keys.MarkOpen):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.SetState(ctx, id, tropmail.StateOpen)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.SetState(ctx, mailboxID, id, tropmail.StateOpen)
 		}, verbs{"opening…", "opened"}, true
 
 	case key.Matches(msg, m.keys.MarkClose):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.SetState(ctx, id, tropmail.StateClose)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.SetState(ctx, mailboxID, id, tropmail.StateClose)
 		}, verbs{"closing…", "closed"}, true
 
 	case key.Matches(msg, m.keys.Clear):
-		return func(ctx context.Context, c *tropmail.Client, id string) (*tropmail.ActionResult, error) {
-			return c.Emails.ClearAction(ctx, id)
+		return func(ctx context.Context, c *tropmail.Client, mailboxID, id string) (*tropmail.ActionResult, error) {
+			return c.Emails.ClearAction(ctx, mailboxID, id)
 		}, verbs{"clearing…", "cleared"}, true
 	}
 	return nil, verbs{}, false
@@ -542,7 +539,7 @@ func (m Model) runAction(run actionFunc, label verbs) (tea.Model, tea.Cmd) {
 	}
 	m.message = label.running
 	m.isError = false
-	return m, applyAction(m.ctx, m.client, m.store, email, label.done, run)
+	return m, applyAction(m.ctx, m.client, m.mailboxID, email, label.done, run)
 }
 
 func (m Model) withError(text string) Model {
@@ -631,9 +628,6 @@ func (m Model) previewLines() string {
 		meta += " · " + string(*m.detail.ActionStatus)
 	}
 	meta += " · " + string(m.view)
-	if m.detailCached {
-		meta += " · cached"
-	}
 	out.WriteString(m.theme.mutedText.Render(meta) + "\n")
 	out.WriteString(m.theme.mutedText.Render(strings.Repeat("─", maxInt(4, width))) + "\n\n")
 

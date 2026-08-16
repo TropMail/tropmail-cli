@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tropmail/tropmail-cli/internal/cache"
 	"github.com/tropmail/tropmail-cli/internal/output"
 )
 
@@ -33,49 +32,6 @@ func newVersionCommand() *cobra.Command {
 			})
 		},
 	}
-}
-
-func newCacheCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "cache",
-		Short: "Inspect and clear the local body cache",
-	}
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "path",
-		Short: "Print the cache directory",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			dir, err := cache.Dir()
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(os.Stdout, dir)
-			return nil
-		},
-	})
-
-	cmd.AddCommand(&cobra.Command{
-		Use:   "clear",
-		Short: "Delete every cached email body",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			app, err := newApp()
-			if err != nil {
-				return err
-			}
-			removed, err := cache.New(true).Clear()
-			if err != nil {
-				return err
-			}
-			return app.Printer.Print(
-				map[string]any{"removed": removed},
-				func(p *printer) { p.Printf("Removed %d cached bodies\n", removed) },
-			)
-		},
-	})
-
-	return cmd
 }
 
 func newCompletionCommand(root *cobra.Command) *cobra.Command {

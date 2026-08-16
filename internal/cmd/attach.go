@@ -42,9 +42,13 @@ func newAttachListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
-			detail, _, err := app.fetchDetail(
-				cmd.Context(), client, args[0], tropmail.ViewText, "")
+			detail, err := app.fetchDetail(
+				cmd.Context(), client, mailboxID, args[0], tropmail.ViewText, "")
 			if err != nil {
 				return err
 			}
@@ -76,8 +80,12 @@ func newAttachInfoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
-			info, err := client.Attachments.Get(cmd.Context(), args[0])
+			info, err := client.Attachments.Get(cmd.Context(), mailboxID, args[0])
 			if err != nil {
 				return err
 			}
@@ -120,20 +128,23 @@ verdict without rescanning.`,
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			if wholeEmail {
-				scans, err := client.Emails.ScanAttachments(cmd.Context(), args[0])
+				scans, err := client.Emails.ScanAttachments(cmd.Context(), mailboxID, args[0])
 				if err != nil {
 					return err
 				}
-				app.invalidate(args[0])
 				return app.Printer.Print(
 					map[string]any{"scans": scans, "count": len(scans)},
 					func(p *printer) { renderScans(p, scans) },
 				)
 			}
 
-			scan, err := client.Attachments.Scan(cmd.Context(), args[0])
+			scan, err := client.Attachments.Scan(cmd.Context(), mailboxID, args[0])
 			if err != nil {
 				return err
 			}
@@ -194,9 +205,13 @@ All attachments on an email:
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			if wholeEmail {
-				items, err := client.Emails.DownloadAttachments(cmd.Context(), args[0])
+				items, err := client.Emails.DownloadAttachments(cmd.Context(), mailboxID, args[0])
 				if err != nil {
 					return err
 				}
@@ -218,7 +233,7 @@ All attachments on an email:
 					}
 					target := uniquePath(directory, safeName(item.Filename, item.AttachmentID))
 					written, err := client.Attachments.DownloadTo(
-						cmd.Context(), item.AttachmentID, target)
+						cmd.Context(), mailboxID, item.AttachmentID, target)
 					if err != nil {
 						return fmt.Errorf("download %s: %w", item.AttachmentID, err)
 					}
@@ -255,7 +270,7 @@ All attachments on an email:
 				)
 			}
 
-			info, err := client.Attachments.Get(cmd.Context(), args[0])
+			info, err := client.Attachments.Get(cmd.Context(), mailboxID, args[0])
 			if err != nil {
 				return err
 			}
@@ -270,7 +285,7 @@ All attachments on an email:
 				target = uniquePath(outPath, safeName(info.Filename, args[0]))
 			}
 
-			written, err := client.Attachments.DownloadTo(cmd.Context(), args[0], target)
+			written, err := client.Attachments.DownloadTo(cmd.Context(), mailboxID, args[0], target)
 			if err != nil {
 				return err
 			}

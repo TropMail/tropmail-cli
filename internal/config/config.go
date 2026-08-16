@@ -1,8 +1,8 @@
 // Package config loads and persists CLI profiles.
 //
-// Configuration lives at ~/.config/tropmail/config.toml (or $TROPMAIL_CONFIG_DIR).
-// API keys are never written there: they go to the OS keyring, falling back to a
-// 0600 credentials file when no keyring is available.
+// Configuration lives at ~/.tropmail/config.toml (or $TROPMAIL_CONFIG_DIR).
+// API keys are never written there: they go to the OS keyring, or a restricted
+// credentials file when no keyring is available.
 package config
 
 import (
@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -30,6 +31,8 @@ type Profile struct {
 	// Email is cached from the last successful login, for display only.
 	Email string `toml:"email,omitempty"`
 	Tier  string `toml:"tier,omitempty"`
+	// MailboxID is remembered when the key sees exactly one inbox.
+	MailboxID string `toml:"mailbox_id,omitempty"`
 }
 
 // Config is the on-disk configuration file.
@@ -43,11 +46,11 @@ func Dir() (string, error) {
 	if custom := os.Getenv("TROPMAIL_CONFIG_DIR"); custom != "" {
 		return custom, nil
 	}
-	base, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("locate config directory: %w", err)
+		return "", fmt.Errorf("locate home directory: %w", err)
 	}
-	return filepath.Join(base, "tropmail"), nil
+	return filepath.Join(home, ".tropmail"), nil
 }
 
 // Path returns the configuration file path.
@@ -62,6 +65,7 @@ func Path() (string, error) {
 // Load reads the configuration file. A missing file yields an empty config so
 // the CLI starts instantly on a fresh machine.
 func Load() (*Config, error) {
+	migrateLegacyConfig()
 	path, err := Path()
 	if err != nil {
 		return nil, err
@@ -180,4 +184,46 @@ func (p Profile) Endpoint() string {
 		return p.BaseURL
 	}
 	return DefaultBaseURL
+}
+
+var migrateOnce sync.Once
+
+// migrateLegacyConfig copies ~/.config/tropmail into ~/.tropmail once, so a
+// profile created before the home-directory move keeps working.
+func migrateLegacyConfig() {
+	if os.Getenv("TROPMAIL_CONFIG_DIR") != "" {
+		return
+	}
+	migrateOnce.Do(func() {
+		dest, err := Dir()
+		if err != nil {
+			return
+		}
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return
+		}
+		copyLegacyFiles(dest, filepath.Join(base, "tropmail"))
+	})
+}
+
+func copyLegacyFiles(dest, legacy string) {
+	if dest == "" || legacy == "" || dest == legacy {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(dest, "config.toml")); err == nil {
+		return
+	}
+	for _, name := range []string{"config.toml", "credentials.toml"} {
+		raw, err := os.ReadFile(filepath.Join(legacy, name))
+		if err != nil {
+			continue
+		}
+		if err := os.MkdirAll(dest, 0o700); err != nil {
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dest, name), raw, 0o600); err != nil {
+			return
+		}
+	}
 }

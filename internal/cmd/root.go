@@ -2,14 +2,15 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	tropmail "github.com/tropmail/tropmail-go"
 
-	"github.com/tropmail/tropmail-cli/internal/cache"
 	"github.com/tropmail/tropmail-cli/internal/config"
 	"github.com/tropmail/tropmail-cli/internal/output"
 )
@@ -36,10 +37,10 @@ type globalFlags struct {
 	apiKey   string
 	baseURL  string
 	profile  string
+	mailbox  string
 	timeout  time.Duration
 	noColor  bool
 	quiet    bool
-	noCache  bool
 	throttle bool
 }
 
@@ -51,7 +52,6 @@ type printer = output.Printer
 // App carries everything a command needs: rendering, credentials, and a client.
 type App struct {
 	Printer *output.Printer
-	Cache   *cache.Cache
 	Config  *config.Config
 	Profile string
 }
@@ -64,7 +64,6 @@ func newApp() (*App, error) {
 	}
 	return &App{
 		Printer: output.New(flags.json, flags.quiet, flags.noColor),
-		Cache:   cache.New(!flags.noCache),
 		Config:  cfg,
 		Profile: cfg.ResolveName(flags.profile),
 	}, nil
@@ -101,6 +100,40 @@ func (a *App) Client() (*tropmail.Client, error) {
 		tropmail.WithThrottle(flags.throttle),
 		tropmail.WithUserAgent("tropmail-cli/"+Version),
 	)
+}
+
+// ResolveMailboxID picks the inbox for mail commands.
+//
+// Precedence: --mailbox, TROPMAIL_MAILBOX_ID, the profile's remembered id, then
+// the inbox list when that list contains exactly one inbox. Multiple inboxes
+// fail with a copy-paste example rather than guessing.
+func (a *App) ResolveMailboxID(ctx context.Context, client *tropmail.Client) (string, error) {
+	if flags.mailbox != "" {
+		return flags.mailbox, nil
+	}
+	if env := os.Getenv("TROPMAIL_MAILBOX_ID"); env != "" {
+		return env, nil
+	}
+	if remembered := a.Config.Get(a.Profile).MailboxID; remembered != "" {
+		return remembered, nil
+	}
+
+	listed, err := client.Mailboxes.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	boxes := listed.Mailboxes
+	switch len(boxes) {
+	case 0:
+		return "", errors.New("this API key has no mailboxes")
+	case 1:
+		return boxes[0].ID, nil
+	default:
+		return "", fmt.Errorf(
+			"more than one mailbox; pass --mailbox <id>\n  tropmail ls --mailbox %s\n  tropmail mailboxes",
+			boxes[0].ID,
+		)
+	}
 }
 
 // Execute runs the CLI and returns the process exit code.
@@ -180,22 +213,22 @@ and AI agents.`,
 	persistent.BoolVar(&flags.json, "json", false, "output machine-readable JSON")
 	persistent.StringVar(&flags.apiKey, "api-key", "", "API key (overrides the stored credential)")
 	persistent.StringVar(&flags.baseURL, "base-url", "", "API base URL")
+	persistent.StringVar(&flags.mailbox, "mailbox", "", "mailbox UUID (or TROPMAIL_MAILBOX_ID)")
 	persistent.StringVarP(&flags.profile, "profile", "p", "", "configuration profile to use")
 	persistent.DurationVar(&flags.timeout, "timeout", 120*time.Second, "per-request timeout")
 	persistent.BoolVar(&flags.noColor, "no-color", false, "disable coloured output")
 	persistent.BoolVarP(&flags.quiet, "quiet", "q", false, "suppress non-essential output")
-	persistent.BoolVar(&flags.noCache, "no-cache", false, "bypass the local body cache")
-	persistent.BoolVar(&flags.throttle, "throttle", true, "pace requests to the tier rate limit")
+	persistent.BoolVar(&flags.throttle, "throttle", true, "pace requests to the plan rate limit")
 
 	root.AddCommand(
 		newAuthCommand(),
+		newMailboxesCommand(),
 		newMailboxCommand(),
 		newListCommand(),
 		newSearchCommand(),
 		newReadCommand(),
 		newAttachCommand(),
 		newWatchCommand(),
-		newCacheCommand(),
 		newCompletionCommand(root),
 		newVersionCommand(),
 	)

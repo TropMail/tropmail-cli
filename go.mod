@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/spf13/cobra v1.8.1
-	github.com/tropmail/tropmail-go v1.0.0
+	github.com/tropmail/tropmail-go v1.1.0
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/term v0.22.0
 )

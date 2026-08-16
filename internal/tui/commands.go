@@ -8,8 +8,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	tropmail "github.com/tropmail/tropmail-go"
-
-	"github.com/tropmail/tropmail-cli/internal/cache"
 )
 
 // Messages delivered back into Update once background work finishes.
@@ -32,7 +30,6 @@ type (
 		id     string
 		view   tropmail.View
 		detail *tropmail.EmailDetail
-		cached bool
 		err    error
 	}
 
@@ -45,9 +42,9 @@ type (
 )
 
 // loadMailbox fetches the mailbox summary shown in the title bar.
-func loadMailbox(ctx context.Context, client *tropmail.Client) tea.Cmd {
+func loadMailbox(ctx context.Context, client *tropmail.Client, mailboxID string) tea.Cmd {
 	return func() tea.Msg {
-		mailbox, err := client.Mailbox.Get(ctx)
+		mailbox, err := client.Mailboxes.Get(ctx, mailboxID)
 		return mailboxLoadedMsg{mailbox: mailbox, err: err}
 	}
 }
@@ -56,13 +53,14 @@ func loadMailbox(ctx context.Context, client *tropmail.Client) tea.Cmd {
 func loadPage(
 	ctx context.Context,
 	client *tropmail.Client,
+	mailboxID string,
 	query string,
 	status tropmail.ListStatus,
 	page, pageSize int,
 	replace bool,
 ) tea.Cmd {
 	return func() tea.Msg {
-		opts := tropmail.ListOptions{Limit: pageSize, Page: page, Status: status}
+		opts := tropmail.ListOptions{MailboxID: mailboxID, Limit: pageSize, Page: page, Status: status}
 
 		var (
 			list *tropmail.EmailList
@@ -84,30 +82,23 @@ func loadPage(
 	}
 }
 
-// loadDetail fetches a body, serving the on-disk cache when it already has one.
+// loadDetail fetches a body for display. Nothing is written to disk.
 func loadDetail(
 	ctx context.Context,
 	client *tropmail.Client,
-	store *cache.Cache,
+	mailboxID string,
 	email tropmail.Email,
 	view tropmail.View,
 ) tea.Cmd {
 	return func() tea.Msg {
-		key := cache.BodyKey(email.ID, string(view))
-
-		var cached tropmail.EmailDetail
-		if store.Get(key, &cached) && cached.Content != "" {
-			return detailLoadedMsg{id: email.ID, view: view, detail: &cached, cached: true}
-		}
-
 		var (
 			detail *tropmail.EmailDetail
 			err    error
 		)
 		if view == tropmail.ViewMarkdown {
-			detail, err = client.Emails.GetMarkdown(ctx, email.ID, email.Timestamp)
+			detail, err = client.Emails.GetMarkdown(ctx, mailboxID, email.ID, email.Timestamp)
 		} else {
-			detail, err = client.Emails.Get(ctx, email.ID, tropmail.GetOptions{
+			detail, err = client.Emails.Get(ctx, mailboxID, email.ID, tropmail.GetOptions{
 				View:      view,
 				Timestamp: email.Timestamp,
 			})
@@ -115,8 +106,6 @@ func loadDetail(
 		if err != nil {
 			return detailLoadedMsg{id: email.ID, view: view, err: err}
 		}
-
-		store.Put(key, detail)
 		return detailLoadedMsg{id: email.ID, view: view, detail: detail}
 	}
 }
@@ -127,7 +116,6 @@ func loadDetail(
 func copyToClipboard(text string) tea.Cmd {
 	return func() tea.Msg {
 		encoded := base64.StdEncoding.EncodeToString([]byte(text))
-		// One Write so the sequence cannot interleave with a rendered frame.
 		fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\x07", encoded)
 		return nil
 	}
@@ -137,20 +125,13 @@ func copyToClipboard(text string) tea.Cmd {
 func applyAction(
 	ctx context.Context,
 	client *tropmail.Client,
-	store *cache.Cache,
+	mailboxID string,
 	email tropmail.Email,
 	label string,
-	run func(context.Context, *tropmail.Client, string) (*tropmail.ActionResult, error),
+	run func(context.Context, *tropmail.Client, string, string) (*tropmail.ActionResult, error),
 ) tea.Cmd {
 	return func() tea.Msg {
-		result, err := run(ctx, client, email.ID)
-		if err == nil {
-			for _, view := range []tropmail.View{
-				tropmail.ViewText, tropmail.ViewHTML, tropmail.ViewMarkdown,
-			} {
-				store.Remove(cache.BodyKey(email.ID, string(view)))
-			}
-		}
+		result, err := run(ctx, client, mailboxID, email.ID)
 		return actionDoneMsg{id: email.ID, label: label, result: result, err: err}
 	}
 }

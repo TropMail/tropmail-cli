@@ -49,6 +49,10 @@ email is emitted as one line of NDJSON, which pipes cleanly into jq or a script.
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			if interval < minInterval {
 				interval = minInterval
@@ -57,7 +61,7 @@ email is emitted as one line of NDJSON, which pipes cleanly into jq or a script.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			opts := tropmail.ListOptions{Limit: 25, Status: tropmail.ListStatus(status)}
+			opts := tropmail.ListOptions{MailboxID: mailboxID, Limit: 25, Status: tropmail.ListStatus(status)}
 			seen := map[string]bool{}
 
 			// The first poll establishes a baseline so a full mailbox does not

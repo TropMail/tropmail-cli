@@ -67,11 +67,16 @@ client paces itself to your tier's rate limit while doing so.`,
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			opts := tropmail.ListOptions{
-				Limit:  limit,
-				Page:   page,
-				Status: tropmail.ListStatus(status),
+				MailboxID: mailboxID,
+				Limit:     limit,
+				Page:      page,
+				Status:    tropmail.ListStatus(status),
 			}
 
 			if !all {
@@ -138,9 +143,13 @@ fetched, not what exists.`,
 			if err != nil {
 				return err
 			}
+			mailboxID, err := app.ResolveMailboxID(cmd.Context(), client)
+			if err != nil {
+				return err
+			}
 
 			query := args[0]
-			opts := tropmail.ListOptions{Limit: limit, Page: page}
+			opts := tropmail.ListOptions{MailboxID: mailboxID, Limit: limit, Page: page}
 
 			if !all {
 				result, err := client.Emails.Search(cmd.Context(), query, opts)
