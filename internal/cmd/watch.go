@@ -117,7 +117,7 @@ email is emitted as one line of NDJSON, which pipes cleanly into jq or a script.
 
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 15*time.Second,
 		"poll interval (minimum 2s)")
-	cmd.Flags().StringVarP(&status, "status", "s", "all", "filter new mail by status")
+	cmd.Flags().StringVarP(&status, "status", "s", "all", "filter: all, Open, Close, Favorite, Block, Phishing, Scam, Malicious")
 	cmd.Flags().StringVar(&execArgs, "exec", "",
 		"shell command to run per email; $TROPMAIL_ID, $TROPMAIL_SUBJECT and $TROPMAIL_FROM are set")
 	cmd.Flags().BoolVar(&once, "once", false, "establish the baseline and exit (useful in tests)")

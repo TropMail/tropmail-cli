@@ -352,7 +352,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Filter):
 		m.mode = modeFilter
-		m.input.Placeholder = "all, Open, Close, Favorite, Delete, Block, Phishing, Scam, Malicious"
+		m.input.Placeholder = "all, Open, Close, Favorite, Block, Phishing, Scam, Malicious"
 		m.input.SetValue("")
 		m.input.Focus()
 		return m, textinput.Blink

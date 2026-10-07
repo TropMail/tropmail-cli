@@ -112,7 +112,7 @@ client paces itself to your tier's rate limit while doing so.`,
 	cmd.Flags().IntVarP(&limit, "limit", "n", 20, "emails per page (1-100)")
 	cmd.Flags().IntVar(&page, "page", 1, "page number")
 	cmd.Flags().StringVarP(&status, "status", "s", "all",
-		"filter: all, Open, Close, Favorite, Delete, Block, Phishing, Scam, Malicious")
+		"filter: all, Open, Close, Favorite, Block, Phishing, Scam, Malicious")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "fetch every page")
 	return cmd
 }
