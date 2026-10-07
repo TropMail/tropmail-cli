@@ -101,7 +101,7 @@ func fakeAPI(t *testing.T, requests *[]string) *httptest.Server {
 				"attachment_id": "22222222", "email_id": "11111111",
 				"filename": "invoice.pdf", "size": 2048, "scan_status": "Clean",
 			}
-		case strings.HasPrefix(path, "/mailboxes/"):
+		case strings.HasPrefix(path, "/mailbox/"), strings.HasPrefix(path, "/mailboxes/"):
 			data = mailboxPayload
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -278,7 +278,8 @@ func TestActionCommand(t *testing.T) {
 
 	found := false
 	for _, request := range requests {
-		if strings.HasPrefix(request, "POST /api/v1/mailboxes/") {
+		if strings.HasPrefix(request, "POST /api/v1/mailbox/") ||
+			strings.HasPrefix(request, "POST /api/v1/mailboxes/") {
 			found = true
 		}
 	}
@@ -305,6 +306,22 @@ func TestAttachCommands(t *testing.T) {
 	}
 	if decode(t, stdout)["count"].(float64) != 1 {
 		t.Errorf("unexpected count: %s", stdout)
+	}
+
+	stdout, _, err = run(t, server.URL, "attach", "scan", "22222222", "--json")
+	if err != nil {
+		t.Fatalf("attach scan: %v", err)
+	}
+	if decode(t, stdout)["scan_status"] != "Processing" {
+		t.Errorf("new scan should be Processing: %s", stdout)
+	}
+
+	stdout, _, err = run(t, server.URL, "attach", "scan", "22222222", "--wait", "--json")
+	if err != nil {
+		t.Fatalf("attach scan --wait: %v", err)
+	}
+	if decode(t, stdout)["scan_status"] != "Clean" {
+		t.Errorf("--wait should poll GET until Clean: %s", stdout)
 	}
 }
 

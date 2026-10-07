@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	tropmail "github.com/tropmail/tropmail-go"
@@ -107,17 +109,20 @@ func newAttachInfoCommand() *cobra.Command {
 
 func newAttachScanCommand() *cobra.Command {
 	var wholeEmail bool
+	var wait bool
 
 	cmd := &cobra.Command{
 		Use:   "scan <id>",
 		Short: "Scan an attachment for malware",
 		Long: `Scan an attachment for malware.
 
-Scanning is asynchronous: a fresh request comes back as Processing, and the
-result lands on a later read. Already-scanned attachments return the cached
-verdict without rescanning.`,
-		Example: `  tropmail attach scan 018f...            # one attachment
-  tropmail attach scan 018f... --email    # every attachment on an email`,
+A new scan takes a minute or two. Without --wait, tropmail returns while the
+scan is still running (Processing). Pass --wait to wait for Clean, Malicious,
+Suspicious, or Unknown. Files that already have a result are not scanned again.`,
+		Example: `  tropmail attach scan 018f...              # start; usually still Processing
+  tropmail attach scan 018f... --wait       # wait for the result
+  tropmail attach info 018f...              # show status and report
+  tropmail attach scan 018f... --email      # every attachment on an email`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := newApp()
@@ -133,10 +138,22 @@ verdict without rescanning.`,
 				return err
 			}
 
+			waitCtx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+			defer cancel()
+
 			if wholeEmail {
 				scans, err := client.Emails.ScanAttachments(cmd.Context(), mailboxID, args[0])
 				if err != nil {
 					return err
+				}
+				if wait {
+					for i := range scans {
+						done, err := waitForAttachmentScan(waitCtx, client, mailboxID, scans[i])
+						if err != nil {
+							return err
+						}
+						scans[i] = done
+					}
 				}
 				return app.Printer.Print(
 					map[string]any{"scans": scans, "count": len(scans)},
@@ -148,6 +165,13 @@ verdict without rescanning.`,
 			if err != nil {
 				return err
 			}
+			if wait {
+				done, err := waitForAttachmentScan(waitCtx, client, mailboxID, *scan)
+				if err != nil {
+					return err
+				}
+				scan = &done
+			}
 			return app.Printer.Print(scan, func(p *printer) {
 				renderScans(p, []tropmail.Scan{*scan})
 			})
@@ -156,7 +180,60 @@ verdict without rescanning.`,
 
 	cmd.Flags().BoolVarP(&wholeEmail, "email", "e", false,
 		"treat the id as an email id and scan all of its attachments")
+	cmd.Flags().BoolVar(&wait, "wait", false,
+		"wait until the scan finishes (up to 5 minutes)")
 	return cmd
+}
+
+func scanStatusIsTerminal(status tropmail.ScanStatus) bool {
+	switch status {
+	case tropmail.ScanClean, tropmail.ScanMalicious, tropmail.ScanSuspicious, tropmail.ScanUnknown:
+		return true
+	case tropmail.ScanNotScanned, tropmail.ScanProcessing, "":
+		return false
+	default:
+		return false
+	}
+}
+
+func scanFromAttachment(info *tropmail.Attachment) tropmail.Scan {
+	return tropmail.Scan{
+		Status:       string(info.ScanStatus),
+		AttachmentID: info.AttachmentID,
+		EmailID:      info.EmailID,
+		Filename:     info.Filename,
+		Size:         info.Size,
+		MimeType:     info.MimeType,
+		ScanStatus:   info.ScanStatus,
+		ScannedAt:    info.ScannedAt,
+	}
+}
+
+func waitForAttachmentScan(
+	ctx context.Context,
+	client *tropmail.Client,
+	mailboxID string,
+	started tropmail.Scan,
+) (tropmail.Scan, error) {
+	if scanStatusIsTerminal(started.ScanStatus) {
+		return started, nil
+	}
+	id := started.AttachmentID
+	for {
+		info, err := client.Attachments.Get(ctx, mailboxID, id)
+		if err != nil {
+			return tropmail.Scan{}, err
+		}
+		if scanStatusIsTerminal(info.ScanStatus) {
+			return scanFromAttachment(info), nil
+		}
+		select {
+		case <-ctx.Done():
+			return tropmail.Scan{}, fmt.Errorf(
+				"timed out waiting for scan %s (still %s)", id, info.ScanStatus)
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func renderScans(p *printer, scans []tropmail.Scan) {

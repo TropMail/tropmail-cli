@@ -82,6 +82,10 @@ tropmail search --mailbox "$MAILBOX_ID" "billing@stripe.com" --all --json \
 tropmail attach download <email-id> --email
 tropmail attach download <email-id> --email -o ./my-inbox
 
+# Start a malware scan. Without --wait this returns while the scan is still running.
+tropmail attach scan <attachment-id> --wait
+tropmail attach info <attachment-id>
+
 # Run a hook whenever mail arrives
 tropmail watch --exec 'notify-send "TropMail" "$TROPMAIL_SUBJECT"'
 ```
@@ -115,7 +119,7 @@ and request id.
 | `search <query>` | full-text search |
 | `read <id>` | print one message, `--view`, `--raw` |
 | `open\|close\|fav\|block\|unblock\|delete <id>...` | change state or status |
-| `attach ls\|info\|scan\|download` | attachments |
+| `attach ls\|info\|scan\|download` | attachments (`scan --wait` waits for the result) |
 | `watch` | poll for new mail |
 | `completion <shell>` | shell completions |
 | `version` | version, commit, build date |
@@ -162,7 +166,7 @@ Pin a released version of that module in `go.mod`.
 
 ## Docs
 
-Guides and API reference: [docs.tropmail.com](https://docs.tropmail.com/sdks/cli/).
+Guides and API reference: [docs.tropmail.com/cli](https://docs.tropmail.com/cli/overview/).
 
 ## License
 

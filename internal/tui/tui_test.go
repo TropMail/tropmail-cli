@@ -30,7 +30,8 @@ func stubAPI(t *testing.T) *tropmail.Client {
 					"opened_count": 2, "closed_count": 1, "favorite_count": 1,
 				}},
 			}
-		case strings.Contains(r.URL.Path, "/mailboxes/") && !strings.Contains(r.URL.Path, "/emails") && !strings.Contains(r.URL.Path, "/attachments"):
+		case strings.Contains(r.URL.Path, "/mailbox/") && !strings.Contains(r.URL.Path, "/emails") && !strings.Contains(r.URL.Path, "/attachments"),
+			strings.Contains(r.URL.Path, "/mailboxes/") && !strings.Contains(r.URL.Path, "/emails") && !strings.Contains(r.URL.Path, "/attachments"):
 			data = map[string]any{
 				"id": "mb1", "email": "user@tropmail.com",
 				"opened_count": 2, "closed_count": 1, "favorite_count": 1,
